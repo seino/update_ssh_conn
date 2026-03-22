@@ -1,15 +1,17 @@
+import argparse
 import csv
-import os
-import requests
-import pymsteams
-import time
-import logging
 import ipaddress
+import logging
+import os
+import sys
+import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
-from functools import lru_cache
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+
+import pymsteams
+import requests
 from dotenv import load_dotenv
 
 # 環境変数を読み込み
@@ -26,8 +28,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ServerInfo:
-    """サーバー接続情報を格納するデータクラス"""
-
     url: str
     user_id: str
     credential: str  # password or api_key
@@ -35,15 +35,13 @@ class ServerInfo:
 
 @dataclass
 class UpdateResult:
-    """更新結果を格納するデータクラス"""
-
     server: str
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class Config:
-    """設定クラス - 環境変数から設定を読み込み"""
+    """環境変数から設定を一元管理"""
 
     # スクリプトのディレクトリを基準にする
     BASE_DIR = Path(__file__).resolve().parent
@@ -60,17 +58,13 @@ class Config:
 
     # 認証とリクエスト設定
     SSH_KEYWORD = "SSH登録"
-    REQUEST_DELAY = int(os.getenv("REQUEST_DELAY", "2"))  # リクエスト間の遅延（秒）
-    RATE_LIMIT_ADDITIONAL_DELAY = int(
-        os.getenv("RATE_LIMIT_DELAY", "4")
-    )  # レート制限時の追加遅延（秒）
-    MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))  # 最大リトライ回数
-    RETRY_BACKOFF_FACTOR = float(
-        os.getenv("RETRY_BACKOFF_FACTOR", "2.0")
-    )  # リトライ時のバックオフ係数
+    REQUEST_DELAY = int(os.getenv("REQUEST_DELAY", "2"))
+    RATE_LIMIT_ADDITIONAL_DELAY = int(os.getenv("RATE_LIMIT_DELAY", "4"))
+    MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+    RETRY_BACKOFF_FACTOR = float(os.getenv("RETRY_BACKOFF_FACTOR", "2.0"))
 
     # 通知設定
-    NOTIFICATION_TYPE = os.getenv("NOTIFICATION_TYPE", "teams").lower()  # teams, slack, chatwork
+    NOTIFICATION_TYPE = os.getenv("NOTIFICATION_TYPE", "teams").lower()
     TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
     SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
     CHATWORK_API_TOKEN = os.getenv("CHATWORK_API_TOKEN")
@@ -86,10 +80,24 @@ class Config:
     )
 
     @classmethod
-    def validate(cls):
-        """設定の妥当性を検証"""
-        if cls.ENABLE_NOTIFICATIONS and not cls.TEAMS_WEBHOOK_URL:
-            logger.warning("通知が有効ですがWebhook URLが設定されていません")
+    def validate(cls) -> None:
+        if not cls.ENABLE_NOTIFICATIONS:
+            return
+
+        notification_type = cls.NOTIFICATION_TYPE
+        is_valid = False
+
+        if notification_type == "teams" and cls.TEAMS_WEBHOOK_URL:
+            is_valid = True
+        elif notification_type == "slack" and cls.SLACK_WEBHOOK_URL:
+            is_valid = True
+        elif notification_type == "chatwork" and cls.CHATWORK_API_TOKEN and cls.CHATWORK_ROOM_ID:
+            is_valid = True
+
+        if not is_valid:
+            logger.warning(
+                f"通知タイプ '{notification_type}' に必要な設定が不足しています。通知を無効化します"
+            )
             cls.ENABLE_NOTIFICATIONS = False
 
         # CSVファイルの存在確認
@@ -99,27 +107,23 @@ class Config:
 
 
 class Notifier(ABC):
-    """通知サービスの基底クラス"""
 
     def __init__(self):
         self.enabled = Config.ENABLE_NOTIFICATIONS
 
     @abstractmethod
     def send_notification(self, title: str, text: str) -> bool:
-        """通知を送信する抽象メソッド"""
         pass
 
 
 class TeamsNotifier(Notifier):
-    """Microsoft Teamsへの通知を処理するクラス"""
 
-    def __init__(self, hook_url: Optional[str]):
+    def __init__(self, hook_url: str | None):
         super().__init__()
         self.hook_url = hook_url
         self.enabled = self.enabled and bool(hook_url)
 
     def send_notification(self, title: str, text: str) -> bool:
-        """TeamsにカードメッセージとしてWebhook通知を送信"""
         if not self.enabled:
             logger.info(f"通知スキップ（無効化中）: {title}")
             return False
@@ -137,15 +141,13 @@ class TeamsNotifier(Notifier):
 
 
 class SlackNotifier(Notifier):
-    """Slackへの通知を処理するクラス"""
 
-    def __init__(self, webhook_url: Optional[str]):
+    def __init__(self, webhook_url: str | None):
         super().__init__()
         self.webhook_url = webhook_url
         self.enabled = self.enabled and bool(webhook_url)
 
     def send_notification(self, title: str, text: str) -> bool:
-        """SlackにWebhook通知を送信"""
         if not self.enabled:
             logger.info(f"通知スキップ（無効化中）: {title}")
             return False
@@ -167,16 +169,14 @@ class SlackNotifier(Notifier):
 
 
 class ChatworkNotifier(Notifier):
-    """Chatworkへの通知を処理するクラス"""
 
-    def __init__(self, api_token: Optional[str], room_id: Optional[str]):
+    def __init__(self, api_token: str | None, room_id: str | None):
         super().__init__()
         self.api_token = api_token
         self.room_id = room_id
         self.enabled = self.enabled and bool(api_token) and bool(room_id)
 
     def send_notification(self, title: str, text: str) -> bool:
-        """ChatworkにAPI経由で通知を送信"""
         if not self.enabled:
             logger.info(f"通知スキップ（無効化中）: {title}")
             return False
@@ -197,103 +197,94 @@ class ChatworkNotifier(Notifier):
 
 
 class NotifierFactory:
-    """通知サービスのファクトリークラス"""
 
     @staticmethod
     def create() -> Notifier:
-        """環境変数に基づいて適切な通知サービスを生成"""
         notification_type = Config.NOTIFICATION_TYPE
 
         if notification_type == "slack":
             return SlackNotifier(Config.SLACK_WEBHOOK_URL)
         elif notification_type == "chatwork":
             return ChatworkNotifier(Config.CHATWORK_API_TOKEN, Config.CHATWORK_ROOM_ID)
-        else:  # デフォルトはteams
+        else:
             return TeamsNotifier(Config.TEAMS_WEBHOOK_URL)
 
 
-class IPAddressFetcher:
-    """現在のIPアドレスを取得するクラス"""
+# --- IP アドレス取得 ---
 
-    @staticmethod
-    def _validate_ip_address(ip_str: str) -> str:
-        """IPアドレスの妥当性を検証（IPv4/IPv6対応）"""
+
+def validate_ip_address(ip_str: str) -> str:
+    """IPアドレスの妥当性を検証（IPv4/IPv6対応）"""
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        return str(ip_obj)
+    except ValueError as e:
+        raise ValueError(f"無効なIPアドレス形式: {ip_str} ({e})")
+
+
+@lru_cache(maxsize=1)
+def get_current_ip() -> str:
+    """現在のIPアドレスを取得（固定IP優先、なければ動的取得）"""
+    if Config.FIXED_IP_ADDRESS:
+        ip_address = validate_ip_address(Config.FIXED_IP_ADDRESS)
+        logger.info(f"固定IPアドレスを使用: {ip_address}")
+        return ip_address
+
+    try:
+        response = requests.get(Config.IP_CHECK_URL, timeout=10)
+        response.raise_for_status()
+        ip_address = response.text.strip()
+        validated_ip = validate_ip_address(ip_address)
+        logger.info(f"動的に取得したIPアドレス: {validated_ip}")
+        return validated_ip
+    except requests.RequestException as e:
+        logger.error(f"IP取得エラー: {e}")
+        raise
+    except ValueError as e:
+        logger.error(f"IP検証エラー: {e}")
+        raise
+
+
+# --- リトライ ---
+
+
+def with_retry(func, *args, max_retries: int | None = None, **kwargs):
+    """指定された関数をリトライ付きで実行"""
+    max_retries = max_retries or Config.MAX_RETRIES
+    last_exception = None
+
+    for attempt in range(max_retries):
         try:
-            # ipaddressモジュールで厳密な検証
-            ip_obj = ipaddress.ip_address(ip_str)
-            return str(ip_obj)
-        except ValueError as e:
-            raise ValueError(f"無効なIPアドレス形式: {ip_str} ({e})")
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                wait_time = Config.REQUEST_DELAY * (
+                    Config.RETRY_BACKOFF_FACTOR ** attempt
+                )
+                logger.warning(
+                    f"リトライ {attempt + 1}/{max_retries}: {wait_time}秒待機"
+                )
+                time.sleep(wait_time)
+            else:
+                logger.error(f"最大リトライ回数に到達: {e}")
 
-    @staticmethod
-    @lru_cache(maxsize=1)
-    def get_current_ip() -> str:
-        """現在のIPアドレスを取得（固定IP優先、なければ動的取得）"""
-        # 環境変数で固定IPが設定されている場合はそれを使用
-        if Config.FIXED_IP_ADDRESS:
-            ip_address = IPAddressFetcher._validate_ip_address(
-                Config.FIXED_IP_ADDRESS
-            )
-            logger.info(f"固定IPアドレスを使用: {ip_address}")
-            return ip_address
-
-        # 固定IPが設定されていない場合は動的に取得
-        try:
-            response = requests.get(Config.IP_CHECK_URL, timeout=10)
-            response.raise_for_status()
-            ip_address = response.text.strip()
-
-            # IPアドレスの厳密な検証
-            validated_ip = IPAddressFetcher._validate_ip_address(ip_address)
-            logger.info(f"動的に取得したIPアドレス: {validated_ip}")
-            return validated_ip
-        except requests.RequestException as e:
-            logger.error(f"IP取得エラー: {e}")
-            raise
-        except ValueError as e:
-            logger.error(f"IP検証エラー: {e}")
-            raise
+    raise last_exception
 
 
-class RetryHandler:
-    """リトライ処理を管理するクラス"""
+# --- サーバー更新 ---
 
-    @staticmethod
-    def with_retry(func, *args, max_retries: int = None, **kwargs):
-        """指定された関数をリトライ付きで実行"""
-        max_retries = max_retries or Config.MAX_RETRIES
-        last_exception = None
-
-        for attempt in range(max_retries):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                last_exception = e
-                if attempt < max_retries - 1:
-                    wait_time = Config.REQUEST_DELAY * (
-                        Config.RETRY_BACKOFF_FACTOR**attempt
-                    )
-                    logger.warning(
-                        f"リトライ {attempt + 1}/{max_retries}: {wait_time}秒待機"
-                    )
-                    time.sleep(wait_time)
-                else:
-                    logger.error(f"最大リトライ回数に到達: {e}")
-
-        raise last_exception
+HEADER_KEYWORDS = ["サブドメイン", "subdomain", "url", "URL"]
 
 
-class ServerUpdater:
-    """サーバーのSSH接続設定を更新する基底クラス"""
+class ServerUpdater(ABC):
 
     def __init__(self, csv_file: str, server_type: str, notifier: Notifier):
         self.csv_file = csv_file
         self.server_type = server_type
         self.notifier = notifier
-        self.ip_fetcher = IPAddressFetcher()
-        self.retry_handler = RetryHandler()
 
-    def update_all_servers(self) -> List[UpdateResult]:
+    def update_all_servers(self) -> list[UpdateResult]:
         """CSVから全てのサーバー情報を読み込み、SSH設定を更新"""
         results = []
 
@@ -310,8 +301,7 @@ class ServerUpdater:
 
         for server_info in server_list:
             try:
-                # リトライ付きで更新を実行
-                self.retry_handler.with_retry(self._update_server, server_info)
+                with_retry(self._update_server, server_info)
                 results.append(UpdateResult(server=server_info.url, success=True))
                 success_count += 1
 
@@ -325,18 +315,14 @@ class ServerUpdater:
                 failure_count += 1
                 failed_servers.append(f"{server_info.url}: {error_msg}")
                 logger.error(f"更新失敗 ({server_info.url}): {error_msg}")
-                # エラーがあっても次のサーバーの処理を継続
 
-            # リクエスト間に遅延を入れる
             time.sleep(Config.REQUEST_DELAY)
 
-        # 結果の通知
         self._send_completion_notification(success_count, failure_count, failed_servers)
 
         return results
 
-    def _read_server_list(self) -> List[ServerInfo]:
-        """CSVファイルからサーバー情報を読み込む"""
+    def _read_server_list(self) -> list[ServerInfo]:
         server_list = []
 
         try:
@@ -348,7 +334,14 @@ class ServerUpdater:
                         logger.debug(f"行{row_num}: 空行をスキップ")
                         continue
 
-                    # 不完全なデータをスキップ（詳細ログ付き）
+                    # ヘッダー行をスキップ
+                    if row_num == 1 and any(
+                        keyword in row[0] for keyword in HEADER_KEYWORDS
+                    ):
+                        logger.debug("行1: ヘッダー行をスキップ")
+                        continue
+
+                    # 不完全なデータをスキップ
                     if len(row) < 3:
                         logger.warning(
                             f"行{row_num}: 不完全なデータをスキップ - "
@@ -380,14 +373,13 @@ class ServerUpdater:
         logger.info(f"{len(server_list)}件のサーバー情報を読み込みました")
         return server_list
 
+    @abstractmethod
     def _update_server(self, server_info: ServerInfo) -> None:
-        """サブクラスで実装する抽象メソッド"""
-        raise NotImplementedError("サブクラスでこのメソッドを実装する必要があります")
+        pass
 
     def _send_completion_notification(
-        self, success_count: int, failure_count: int, failed_servers: List[str]
+        self, success_count: int, failure_count: int, failed_servers: list[str]
     ) -> None:
-        """更新完了をTeamsに通知"""
         if success_count == 0 and failure_count == 0:
             return
 
@@ -398,7 +390,7 @@ class ServerUpdater:
             text_parts.append("\n失敗したサーバー:")
             text_parts.extend(
                 f"  - {server}" for server in failed_servers[:10]
-            )  # 最大10件まで表示
+            )
             if len(failed_servers) > 10:
                 text_parts.append(f"  ... 他{len(failed_servers) - 10}件")
 
@@ -406,20 +398,16 @@ class ServerUpdater:
         self.notifier.send_notification(title, text)
 
     def _send_error_notification(self, error_message: str) -> None:
-        """エラー通知を送信"""
         title = f"{self.server_type} エラー発生"
         self.notifier.send_notification(title, error_message)
 
 
 class ValueServerUpdater(ServerUpdater):
-    """ValueServerのSSH接続設定を更新するクラス"""
 
-    # ValueServer固有のエンコーディング設定
     ENCODING = "shift_jis"
 
     def _update_server(self, server_info: ServerInfo) -> None:
-        """ValueServerのSSH接続IPを更新"""
-        current_ip = self.ip_fetcher.get_current_ip()
+        current_ip = get_current_ip()
         logger.info(
             f"ValueServer更新開始: {server_info.url}, アカウント: {server_info.user_id}, 登録IP: {current_ip}"
         )
@@ -439,7 +427,6 @@ class ValueServerUpdater(ServerUpdater):
             )
             response.raise_for_status()
 
-            # レスポンスの検証
             if "エラー" in response.text or "失敗" in response.text:
                 raise ValueError(f"サーバーエラーレスポンス: {response.text[:200]}")
 
@@ -452,35 +439,28 @@ class ValueServerUpdater(ServerUpdater):
 
 
 class CoreServerUpdater(ServerUpdater):
-    """CoreServerのSSH接続設定を更新するクラス"""
 
     def _update_server(self, server_info: ServerInfo) -> None:
-        """CoreServerのSSH接続IPを更新"""
         server_name = f"{server_info.url}.coreserver.jp"
-        current_ip = self.ip_fetcher.get_current_ip()
+        current_ip = get_current_ip()
         logger.info(
             f"CoreServer更新開始: {server_name}, アカウント: {server_info.user_id}, 登録IP: {current_ip}"
         )
 
-        # APIリクエストの準備
-        payload = (
-            f"account={server_info.user_id}&"
-            f"server_name={server_name}&"
-            f"api_secret_key={server_info.credential}&"
-            f"param[addr]={current_ip}"
-        )
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        payload = {
+            "account": server_info.user_id,
+            "server_name": server_name,
+            "api_secret_key": server_info.credential,
+            "param[addr]": current_ip,
+        }
 
         try:
-            # APIリクエスト送信
             response = requests.post(
-                Config.CORE_SERVER_URL, data=payload, headers=headers, timeout=30
+                Config.CORE_SERVER_URL, data=payload, timeout=30
             )
 
-            # レスポンスの詳細をログに記録（APIキーは除く）
             logger.info(f"CoreServer応答ステータス: {response.status_code}")
 
-            # JSONレスポンスの解析とエラーチェック
             try:
                 response_data = response.json()
             except ValueError:
@@ -495,7 +475,6 @@ class CoreServerUpdater(ServerUpdater):
                     f"CoreServerエラー: {error_target}, {error_message}, コード: {error_code}"
                 )
 
-                # レート制限エラーの場合、追加の遅延を設定
                 if "secret key error limit over" in error_target:
                     logger.warning(
                         f"レート制限検出: {Config.RATE_LIMIT_ADDITIONAL_DELAY}秒待機"
@@ -505,7 +484,6 @@ class CoreServerUpdater(ServerUpdater):
 
                 raise RuntimeError(f"APIエラー: {error_message}")
 
-            # 成功レスポンスの確認
             if response_data.get("status_code") != 200:
                 raise RuntimeError(
                     f"予期しないステータスコード: {response_data.get('status_code')}"
@@ -519,21 +497,29 @@ class CoreServerUpdater(ServerUpdater):
             raise RuntimeError(f"HTTPエラー: {e}")
 
 
-def main():
-    """メイン実行関数"""
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="SSH接続IP自動更新")
+    parser.add_argument("--debug", action="store_true", help="DEBUGログを有効化")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("DEBUGモードが有効です")
+
     logger.info("=" * 50)
     logger.info("SSH接続更新処理を開始")
     logger.info("=" * 50)
 
-    # 設定の検証
     Config.validate()
 
-    try:
-        # 通知ハンドラの初期化（ファクトリーパターンで生成）
-        notifier = NotifierFactory.create()
-        logger.info(f"通知サービス: {Config.NOTIFICATION_TYPE}")
+    notifier = NotifierFactory.create()
+    logger.info(f"通知サービス: {Config.NOTIFICATION_TYPE}")
 
-        # 全体の結果を格納
+    try:
         all_results = []
 
         # ValueServerの更新
@@ -566,9 +552,8 @@ def main():
         success_count = sum(1 for r in all_results if r.success)
         failure_count = sum(1 for r in all_results if not r.success)
 
-        # 現在のIPアドレスを最終確認として表示
         try:
-            final_ip = IPAddressFetcher.get_current_ip()
+            final_ip = get_current_ip()
             logger.info(f"\n最終確認 - 登録されたIPアドレス: {final_ip}")
         except Exception as e:
             logger.warning(f"最終IP確認時のエラー: {e}")
@@ -577,30 +562,28 @@ def main():
         logger.info(f"処理完了 - 成功: {success_count}件, 失敗: {failure_count}件")
         logger.info("=" * 50)
 
-        # 失敗があった場合は詳細を表示
         if failure_count > 0:
             logger.error("\n失敗した更新:")
             for result in all_results:
                 if not result.success:
                     logger.error(f"  - {result.server}: {result.error_message}")
-            return 1  # エラーコードを返す
+            return 1
 
-        return 0  # 正常終了
+        return 0
 
     except Exception as e:
         logger.error(f"予期しないエラー: {str(e)}")
 
-        # エラーを通知サービスに通知
         try:
-            error_notifier = NotifierFactory.create()
-            error_title = "SSH接続更新 - 重大エラー"
-            error_text = f"処理中に予期しないエラーが発生しました:\n{str(e)}"
-            error_notifier.send_notification(error_title, error_text)
+            notifier.send_notification(
+                "SSH接続更新 - 重大エラー",
+                f"処理中に予期しないエラーが発生しました:\n{str(e)}",
+            )
         except Exception as notify_error:
             logger.error(f"エラー通知の送信に失敗: {str(notify_error)}")
 
-        return 1  # エラーコードを返す
+        return 1
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())
