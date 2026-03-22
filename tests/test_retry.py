@@ -6,7 +6,6 @@ from app import with_retry
 
 
 class TestWithRetry:
-
     def test_success_on_first_attempt(self):
         result = with_retry(lambda: 42)
         assert result == 42
@@ -49,8 +48,10 @@ class TestWithRetry:
                 raise RuntimeError("失敗")
             return "OK"
 
-        with patch("app.Config.REQUEST_DELAY", 1), \
-             patch("app.Config.RETRY_BACKOFF_FACTOR", 2.0):
+        with (
+            patch("app.Config.REQUEST_DELAY", 1),
+            patch("app.Config.RETRY_BACKOFF_FACTOR", 2.0),
+        ):
             with_retry(fail_twice, max_retries=3)
 
         # 1回目のリトライ: 1 * (2.0 ** 0) = 1.0秒

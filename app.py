@@ -91,7 +91,11 @@ class Config:
             is_valid = True
         elif notification_type == "slack" and cls.SLACK_WEBHOOK_URL:
             is_valid = True
-        elif notification_type == "chatwork" and cls.CHATWORK_API_TOKEN and cls.CHATWORK_ROOM_ID:
+        elif (
+            notification_type == "chatwork"
+            and cls.CHATWORK_API_TOKEN
+            and cls.CHATWORK_ROOM_ID
+        ):
             is_valid = True
 
         if not is_valid:
@@ -107,7 +111,6 @@ class Config:
 
 
 class Notifier(ABC):
-
     def __init__(self):
         self.enabled = Config.ENABLE_NOTIFICATIONS
 
@@ -117,7 +120,6 @@ class Notifier(ABC):
 
 
 class TeamsNotifier(Notifier):
-
     def __init__(self, hook_url: str | None):
         super().__init__()
         self.hook_url = hook_url
@@ -141,7 +143,6 @@ class TeamsNotifier(Notifier):
 
 
 class SlackNotifier(Notifier):
-
     def __init__(self, webhook_url: str | None):
         super().__init__()
         self.webhook_url = webhook_url
@@ -157,9 +158,7 @@ class SlackNotifier(Notifier):
                 "text": f"*{title}*\n{text}",
                 "username": "SSH接続更新通知",
             }
-            response = requests.post(
-                self.webhook_url, json=payload, timeout=10
-            )
+            response = requests.post(self.webhook_url, json=payload, timeout=10)
             response.raise_for_status()
             logger.info(f"Slack通知送信成功: {title}")
             return True
@@ -169,7 +168,6 @@ class SlackNotifier(Notifier):
 
 
 class ChatworkNotifier(Notifier):
-
     def __init__(self, api_token: str | None, room_id: str | None):
         super().__init__()
         self.api_token = api_token
@@ -197,7 +195,6 @@ class ChatworkNotifier(Notifier):
 
 
 class NotifierFactory:
-
     @staticmethod
     def create() -> Notifier:
         notification_type = Config.NOTIFICATION_TYPE
@@ -260,7 +257,7 @@ def with_retry(func, *args, max_retries: int | None = None, **kwargs):
             last_exception = e
             if attempt < max_retries - 1:
                 wait_time = Config.REQUEST_DELAY * (
-                    Config.RETRY_BACKOFF_FACTOR ** attempt
+                    Config.RETRY_BACKOFF_FACTOR**attempt
                 )
                 logger.warning(
                     f"リトライ {attempt + 1}/{max_retries}: {wait_time}秒待機"
@@ -278,7 +275,6 @@ HEADER_KEYWORDS = ["サブドメイン", "subdomain", "url", "URL"]
 
 
 class ServerUpdater(ABC):
-
     def __init__(self, csv_file: str, server_type: str, notifier: Notifier):
         self.csv_file = csv_file
         self.server_type = server_type
@@ -388,9 +384,7 @@ class ServerUpdater(ABC):
         text_parts = [f"成功: {success_count}件, 失敗: {failure_count}件"]
         if failed_servers:
             text_parts.append("\n失敗したサーバー:")
-            text_parts.extend(
-                f"  - {server}" for server in failed_servers[:10]
-            )
+            text_parts.extend(f"  - {server}" for server in failed_servers[:10])
             if len(failed_servers) > 10:
                 text_parts.append(f"  ... 他{len(failed_servers) - 10}件")
 
@@ -403,7 +397,6 @@ class ServerUpdater(ABC):
 
 
 class ValueServerUpdater(ServerUpdater):
-
     ENCODING = "shift_jis"
 
     def _update_server(self, server_info: ServerInfo) -> None:
@@ -439,7 +432,6 @@ class ValueServerUpdater(ServerUpdater):
 
 
 class CoreServerUpdater(ServerUpdater):
-
     def _update_server(self, server_info: ServerInfo) -> None:
         server_name = f"{server_info.url}.coreserver.jp"
         current_ip = get_current_ip()
@@ -455,9 +447,7 @@ class CoreServerUpdater(ServerUpdater):
         }
 
         try:
-            response = requests.post(
-                Config.CORE_SERVER_URL, data=payload, timeout=30
-            )
+            response = requests.post(Config.CORE_SERVER_URL, data=payload, timeout=30)
 
             logger.info(f"CoreServer応答ステータス: {response.status_code}")
 

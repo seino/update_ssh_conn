@@ -24,26 +24,31 @@ def _create_csv(rows: list[list[str]]) -> str:
 
 
 class TestReadServerList:
-
     def _make_updater(self, csv_path: str) -> CoreServerUpdater:
         return CoreServerUpdater(csv_path, "Test", StubNotifier())
 
     def test_normal_csv(self):
-        path = _create_csv([
-            ["server1", "user1", "pass1"],
-            ["server2", "user2", "pass2"],
-        ])
+        path = _create_csv(
+            [
+                ["server1", "user1", "pass1"],
+                ["server2", "user2", "pass2"],
+            ]
+        )
         updater = self._make_updater(path)
         result = updater._read_server_list()
         assert len(result) == 2
-        assert result[0] == ServerInfo(url="server1", user_id="user1", credential="pass1")
+        assert result[0] == ServerInfo(
+            url="server1", user_id="user1", credential="pass1"
+        )
         Path(path).unlink()
 
     def test_header_row_skipped(self):
-        path = _create_csv([
-            ["サブドメイン", "アカウント", "パスワード"],
-            ["server1", "user1", "pass1"],
-        ])
+        path = _create_csv(
+            [
+                ["サブドメイン", "アカウント", "パスワード"],
+                ["server1", "user1", "pass1"],
+            ]
+        )
         updater = self._make_updater(path)
         result = updater._read_server_list()
         assert len(result) == 1
@@ -51,33 +56,39 @@ class TestReadServerList:
         Path(path).unlink()
 
     def test_subdomain_header_skipped(self):
-        path = _create_csv([
-            ["subdomain", "account", "key"],
-            ["server1", "user1", "pass1"],
-        ])
+        path = _create_csv(
+            [
+                ["subdomain", "account", "key"],
+                ["server1", "user1", "pass1"],
+            ]
+        )
         updater = self._make_updater(path)
         result = updater._read_server_list()
         assert len(result) == 1
         Path(path).unlink()
 
     def test_empty_rows_skipped(self):
-        path = _create_csv([
-            ["server1", "user1", "pass1"],
-            [],
-            ["", "", ""],
-            ["server2", "user2", "pass2"],
-        ])
+        path = _create_csv(
+            [
+                ["server1", "user1", "pass1"],
+                [],
+                ["", "", ""],
+                ["server2", "user2", "pass2"],
+            ]
+        )
         updater = self._make_updater(path)
         result = updater._read_server_list()
         assert len(result) == 2
         Path(path).unlink()
 
     def test_incomplete_rows_skipped(self):
-        path = _create_csv([
-            ["server1", "user1", "pass1"],
-            ["only_url"],
-            ["server2", "user2", "pass2"],
-        ])
+        path = _create_csv(
+            [
+                ["server1", "user1", "pass1"],
+                ["only_url"],
+                ["server2", "user2", "pass2"],
+            ]
+        )
         updater = self._make_updater(path)
         result = updater._read_server_list()
         assert len(result) == 2
@@ -96,10 +107,14 @@ class TestReadServerList:
             updater._read_server_list()
 
     def test_whitespace_stripped(self):
-        path = _create_csv([
-            ["  server1  ", "  user1  ", "  pass1  "],
-        ])
+        path = _create_csv(
+            [
+                ["  server1  ", "  user1  ", "  pass1  "],
+            ]
+        )
         updater = self._make_updater(path)
         result = updater._read_server_list()
-        assert result[0] == ServerInfo(url="server1", user_id="user1", credential="pass1")
+        assert result[0] == ServerInfo(
+            url="server1", user_id="user1", credential="pass1"
+        )
         Path(path).unlink()
