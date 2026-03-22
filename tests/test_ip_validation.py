@@ -4,7 +4,6 @@ from app import validate_ip_address
 
 
 class TestValidateIpAddress:
-
     def test_valid_ipv4(self):
         assert validate_ip_address("192.168.1.1") == "192.168.1.1"
 
