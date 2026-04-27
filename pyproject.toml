@@ -1,0 +1,61 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+extend-exclude = ["log", "csv"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (formatter handles it)
+    "SIM114", # Combine if branches — 通知種別ごとの妥当性チェックは個別記述が読みやすい
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "SIM115", # tests で delete=False の一時ファイルを使うため context manager 不要
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = [
+    "-v",
+    "--strict-markers",
+]
+markers = [
+    "unit: ユニットテスト",
+    "integration: 統合テスト",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+show_missing = true

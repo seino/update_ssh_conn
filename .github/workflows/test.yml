@@ -1,13 +1,53 @@
-name: Test
+name: CI
 
 on:
   push:
-    branches: [master, develop]
+    branches: [main, master, develop]
   pull_request:
-    branches: [master, develop]
+    branches: [main, master, develop]
 
 jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12 をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements-dev.txt
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+  type-check:
+    name: Type Check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12 をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements-dev.txt
+
+      - name: mypy 実行
+        run: mypy app.py
+
   test:
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -20,9 +60,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: 依存パッケージをインストール
         run: pip install -r requirements-dev.txt
 
-      - name: テスト実行
-        run: python -m pytest tests/ -v
+      - name: テスト実行（カバレッジ付き）
+        run: pytest --cov --cov-report=term-missing --cov-report=xml
+
+      - name: カバレッジレポートを Codecov へアップロード
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

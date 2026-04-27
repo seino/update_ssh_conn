@@ -158,6 +158,7 @@ class SlackNotifier(Notifier):
                 "text": f"*{title}*\n{text}",
                 "username": "SSH接続更新通知",
             }
+            assert self.webhook_url is not None
             response = requests.post(self.webhook_url, json=payload, timeout=10)
             response.raise_for_status()
             logger.info(f"Slack通知送信成功: {title}")
@@ -216,7 +217,7 @@ def validate_ip_address(ip_str: str) -> str:
         ip_obj = ipaddress.ip_address(ip_str)
         return str(ip_obj)
     except ValueError as e:
-        raise ValueError(f"無効なIPアドレス形式: {ip_str} ({e})")
+        raise ValueError(f"無効なIPアドレス形式: {ip_str} ({e})") from e
 
 
 @lru_cache(maxsize=1)
@@ -248,7 +249,7 @@ def get_current_ip() -> str:
 def with_retry(func, *args, max_retries: int | None = None, **kwargs):
     """指定された関数をリトライ付きで実行"""
     max_retries = max_retries or Config.MAX_RETRIES
-    last_exception = None
+    last_exception: Exception | None = None
 
     for attempt in range(max_retries):
         try:
@@ -266,6 +267,7 @@ def with_retry(func, *args, max_retries: int | None = None, **kwargs):
             else:
                 logger.error(f"最大リトライ回数に到達: {e}")
 
+    assert last_exception is not None
     raise last_exception
 
 
@@ -282,7 +284,7 @@ class ServerUpdater(ABC):
 
     def update_all_servers(self) -> list[UpdateResult]:
         """CSVから全てのサーバー情報を読み込み、SSH設定を更新"""
-        results = []
+        results: list[UpdateResult] = []
 
         try:
             server_list = self._read_server_list()
@@ -322,7 +324,7 @@ class ServerUpdater(ABC):
         server_list = []
 
         try:
-            with open(self.csv_file, "r", encoding="utf-8") as f:
+            with open(self.csv_file, encoding="utf-8") as f:
                 reader = csv.reader(f)
                 for row_num, row in enumerate(reader, 1):
                     # 空行をスキップ
@@ -425,10 +427,10 @@ class ValueServerUpdater(ServerUpdater):
 
             logger.info(f"ValueServer更新成功: {server_info.url}, 登録IP: {current_ip}")
 
-        except requests.Timeout:
-            raise TimeoutError(f"リクエストタイムアウト: {server_info.url}")
+        except requests.Timeout as e:
+            raise TimeoutError(f"リクエストタイムアウト: {server_info.url}") from e
         except requests.RequestException as e:
-            raise RuntimeError(f"HTTPエラー: {e}")
+            raise RuntimeError(f"HTTPエラー: {e}") from e
 
 
 class CoreServerUpdater(ServerUpdater):
@@ -453,8 +455,8 @@ class CoreServerUpdater(ServerUpdater):
 
             try:
                 response_data = response.json()
-            except ValueError:
-                raise ValueError(f"無効なJSONレスポンス: {response.text[:200]}")
+            except ValueError as e:
+                raise ValueError(f"無効なJSONレスポンス: {response.text[:200]}") from e
 
             if response_data.get("status_code") == 500:
                 error_target = response_data.get("error_target", "")
@@ -481,10 +483,10 @@ class CoreServerUpdater(ServerUpdater):
 
             logger.info(f"CoreServer更新成功: {server_name}, 登録IP: {current_ip}")
 
-        except requests.Timeout:
-            raise TimeoutError(f"リクエストタイムアウト: {server_name}")
+        except requests.Timeout as e:
+            raise TimeoutError(f"リクエストタイムアウト: {server_name}") from e
         except requests.RequestException as e:
-            raise RuntimeError(f"HTTPエラー: {e}")
+            raise RuntimeError(f"HTTPエラー: {e}") from e
 
 
 def parse_args() -> argparse.Namespace:
