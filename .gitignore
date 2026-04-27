@@ -23,6 +23,14 @@ venv.bak/
 # Logs
 *.log
 
+# Test / Coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # OS
 .DS_Store
 Thumbs.db
